@@ -21,17 +21,23 @@ Claude Code and AI agents are massively underrated as general-purpose sysadmin t
 However, when working with resource-constrained devices (SBCs, Raspberry Pis, embedded systems), traditional approaches hit walls:
 
 **Approach 1: SSH from local agent**
+
+```mermaid
+flowchart LR
+    A[Local Claude] -->|SSH| B[Remote Device]
 ```
-Local Claude → SSH → Remote Device
-```
+
 - Agent runs locally, SSHs commands to remote
 - SSH maintains persistent connections with overhead
 - Works, but can be slow and unstable
 
 **Approach 2: Agent on remote device**
+
+```mermaid
+flowchart LR
+    A[SSH] --> B[Remote Claude Agent]
 ```
-SSH → Remote Claude Agent
-```
+
 - Agent RAM usage + SSH overhead
 - Grinds constrained hardware to a halt
 - OOM kills and shell crashes mid-session
@@ -77,62 +83,59 @@ Wherever possible, avoid having critical infrastructure attached to hardware tha
 
 ### Hub-and-Spoke Model
 
-```
-                              ┌─────────────────┐
-                              │  Remote Client  │
-                              │  (Claude Code)  │
-                              └────────┬────────┘
-                                       │
-                            Cloudflare Tunnel / Tailscale
-                                       │
-                                       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                         LAN GATEWAY                               │
-│                    ┌─────────────────────┐                        │
-│                    │   MCP Aggregator    │                        │
-│                    │   (Always-On Host)  │                        │
-│                    │                     │                        │
-│                    │  Exposes tools:     │                        │
-│                    │  • network_resources│                        │
-│                    │  • pi_admin         │                        │
-│                    │  • server_admin     │                        │
-│                    │  • ha_control       │                        │
-│                    └──────────┬──────────┘                        │
-│                               │                                   │
-│            ┌──────────────────┼──────────────────┐                │
-│            │                  │                  │                │
-│            ▼                  ▼                  ▼                │
-│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐          │
-│   │  Pi MCP     │    │  Server MCP │    │  HA MCP     │          │
-│   │  (Edge)     │    │  (Edge)     │    │  (Built-in) │          │
-│   │  ~5MB idle  │    │  ~5MB idle  │    │             │          │
-│   └─────────────┘    └─────────────┘    └─────────────┘          │
-│    Raspberry Pi        Ubuntu VM        Home Assistant            │
-└──────────────────────────────────────────────────────────────────┘
-                              LAN (10.0.0.0/24)
+```mermaid
+flowchart TB
+    subgraph Remote
+        Client[Remote Client<br/>Claude Code]
+    end
+
+    Client -->|Cloudflare Tunnel<br/>or Tailscale| Gateway
+
+    subgraph LAN["LAN Gateway (10.0.0.0/24)"]
+        Gateway[MCP Aggregator<br/>Always-On Host]
+        Gateway -->|HTTP/SSE| Pi[Pi MCP<br/>~5MB idle]
+        Gateway -->|HTTP/SSE| Server[Server MCP<br/>~5MB idle]
+        Gateway -->|HTTP/SSE| HA[HA MCP<br/>Built-in]
+
+        Pi --- PiLabel[Raspberry Pi]
+        Server --- ServerLabel[Ubuntu VM]
+        HA --- HALabel[Home Assistant]
+    end
+
+    subgraph Tools[Exposed Tools]
+        T1[network_resources]
+        T2[pi_admin]
+        T3[server_admin]
+        T4[ha_control]
+    end
+
+    Gateway -.-> Tools
 ```
 
 ### Connection Pattern
 
 The client connects to **one** MCP endpoint (the aggregator), which exposes tools for all network resources:
 
-```
-┌─────────────┐         ┌─────────────────┐         ┌─────────────┐
-│   Claude    │  HTTP   │  MCP Aggregator │  HTTP   │  Edge MCP   │
-│   Code      │◄───────►│  (Gateway)      │◄───────►│  Servers    │
-│             │   SSE   │                 │   SSE   │             │
-└─────────────┘         └─────────────────┘         └─────────────┘
-                              │
-                              │ Provides single endpoint
-                              │ with unified toolset
-                              ▼
-                    ┌─────────────────────┐
-                    │ Tools:              │
-                    │ • network_resources │
-                    │ • pi_admin          │
-                    │ • server_admin      │
-                    │ • [device]_control  │
-                    └─────────────────────┘
+```mermaid
+flowchart LR
+    subgraph Client
+        Claude[Claude Code]
+    end
+
+    subgraph Gateway
+        Aggregator[MCP Aggregator]
+    end
+
+    subgraph Edge[Edge Servers]
+        E1[Pi MCP]
+        E2[Server MCP]
+        E3[HA MCP]
+    end
+
+    Claude <-->|HTTP/SSE| Aggregator
+    Aggregator <-->|HTTP/SSE| E1
+    Aggregator <-->|HTTP/SSE| E2
+    Aggregator <-->|HTTP/SSE| E3
 ```
 
 ---
@@ -151,6 +154,41 @@ The client connects to **one** MCP endpoint (the aggregator), which exposes tool
 | Under load | Crashes on constrained hardware | Handles gracefully |
 
 **The secret sauce**: State management. MCP servers drop to near-idle resource usage when not relaying data. No agents run on low-resource hardware—they remain lightweight listeners until called upon.
+
+### Context Efficiency
+
+Structured tool calls and responses reduce token overhead compared to SSH:
+
+| SSH Approach | MCP Approach |
+|--------------|--------------|
+| Construct: `ssh user@host "cmd"` | Call: `pi_admin(command="cmd")` |
+| Parse raw shell output, MOTD, prompts | Receive structured JSON response |
+| Handle escaping, quoting, exit codes | Clean error semantics |
+| Interpret stderr and connection errors | Typed error responses |
+
+Less context spent on command construction and output parsing means more efficient agent reasoning.
+
+### Sub-Agent Friendly
+
+MCP decouples authentication from tool access, which is critical for multi-agent architectures:
+
+```mermaid
+flowchart TB
+    subgraph SSH["SSH Model ❌"]
+        Parent1[Parent Agent] -->|Needs SSH keys| Sub1[Sub-Agent]
+        Sub1 -->|Needs SSH keys| Remote1[Remote Device]
+    end
+
+    subgraph MCP["MCP Model ✓"]
+        Parent2[Parent Agent] -->|Spawns| Sub2[Sub-Agent]
+        Sub2 -->|API call only| GW[MCP Gateway]
+        GW -->|Authenticated| Remote2[Remote Device]
+    end
+```
+
+- **SSH model**: Sub-agents need SSH key access (security risk) or parent must proxy all commands (bottleneck)
+- **MCP model**: Gateway handles authentication; sub-agents only need API access to the MCP endpoint
+- Tool exposure is declarative—control exactly what's available without distributing shell access
 
 ---
 
@@ -193,27 +231,17 @@ For an example edge server, see [pi-mini-mcp.py](pi-mini-mcp.py).
 
 The pattern can be extended with multiple aggregation layers:
 
-```
-┌─────────────┐
-│ Claude Code │
-└──────┬──────┘
-       │
-       ▼
-┌──────────────────────────┐
-│  MetaMCP / MCP Proxy     │◄── Aggregates multiple sources
-│  (Cloud or Local)        │
-└──────┬───────────────────┘
-       │
-       ├────────────────┬────────────────┐
-       ▼                ▼                ▼
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│ LAN Manager │  │ Cloud MCPs  │  │ Other MCPs  │
-│ MCP         │  │ (APIs, etc) │  │             │
-└──────┬──────┘  └─────────────┘  └─────────────┘
-       │
-       ├──────────┬──────────┐
-       ▼          ▼          ▼
-   [Pi MCP]  [Server]  [Home Asst]
+```mermaid
+flowchart TB
+    Claude[Claude Code] --> MetaMCP[MetaMCP / MCP Proxy<br/>Cloud or Local]
+
+    MetaMCP --> LAN[LAN Manager MCP]
+    MetaMCP --> Cloud[Cloud MCPs<br/>APIs, etc]
+    MetaMCP --> Other[Other MCPs]
+
+    LAN --> Pi[Pi MCP]
+    LAN --> Server[Server MCP]
+    LAN --> HA[Home Assistant]
 ```
 
 Your LAN Manager MCP is itself an MCP server, so it can be added to any aggregator (like MetaMCP) alongside cloud-based MCPs. This allows unified control of local and remote resources through a single client connection.
@@ -243,3 +271,5 @@ This pattern enables:
 - **Stability**: Stateless requests handle better than persistent SSH
 - **Scalability**: Add devices by deploying minimal MCP servers
 - **Flexibility**: Chain through proxies for complex topologies
+- **Context efficiency**: Structured I/O reduces token overhead vs SSH command parsing
+- **Sub-agent friendly**: Authentication at the gateway means no credential distribution to ephemeral agents
