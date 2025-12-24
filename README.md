@@ -42,6 +42,20 @@ flowchart LR
 - Grinds constrained hardware to a halt
 - OOM kills and shell crashes mid-session
 
+**Approach 3: MCP server on remote device (the solution)**
+
+```mermaid
+flowchart LR
+    A[Local Claude] -->|HTTP/SSE| B[MCP Server] --> C[Device]
+```
+
+- Agent runs locally with full resources
+- Lightweight MCP server (~5MB idle) on remote handles requests
+- Stateless HTTP—no persistent connection overhead
+- Device controlled via structured tool calls
+
+This is the core pattern. It can be used standalone for a single device, or scaled into the hub-and-spoke architecture described later for managing multiple devices through an aggregator.
+
 ---
 
 ## The Discovery
