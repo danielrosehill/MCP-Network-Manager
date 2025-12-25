@@ -2,7 +2,7 @@
 
 [![PDF Version](https://img.shields.io/badge/📄_PDF-Download-blue?style=for-the-badge)](MCP-Network-Manager-Pattern.pdf)
 
-![alt text](graphics/1.png)
+![Hub and Spoke Architecture Overview](graphics/hub-spoke-overview.png)
 
 *25 Dec 2025*
 
@@ -28,7 +28,7 @@ However, resource-constrained devices (SBCs, Raspberry Pi units, embedded system
 
 ### Approach 1: SSH from Local Agent
 
-![alt text](graphics/3.png)
+![Approach 1: SSH from Local Agent](graphics/approach-1-ssh-local-agent.png)
 
 ```mermaid
 flowchart LR
@@ -41,7 +41,7 @@ flowchart LR
 
 ### Approach 2: Agent Execution on Remote Device
 
-![alt text](graphics/4.png)
+![Approach 2: Agent Execution on Remote Device](graphics/approach-2-remote-agent-execution.png)
 
 ```mermaid
 flowchart LR
@@ -54,7 +54,7 @@ flowchart LR
 
 ### Approach 3: MCP Server on Remote Device
 
-![alt text](graphics/5.png)
+![Approach 3: MCP Server on Remote Device](graphics/approach-3-mcp-server.png)
 
 ```mermaid
 flowchart LR
@@ -97,13 +97,17 @@ AI agents demonstrate capability for task delegation to sub-agents, including pa
 
 ## 4. Architecture
 
-![alt text](graphics/2.png)
+![Remote Architecture with Cloudflare Tunnel](graphics/remote-architecture-cloudflare.png)
 
 ### Design Principles
 
 Critical infrastructure should not depend on hardware with variable availability (such as desktop workstations). The recommended deployment assumes an always-on host for the proxy/aggregator role—this may itself be a Raspberry Pi or similar low-power device.
 
+---
+
 ### Local Architecture
+
+![alt text](graphics/ha-via-lan-mcp.png)
 
 For local network administration, the client maintains a single connection to the MCP aggregator endpoint, which exposes tools for all network resources:
 
@@ -278,6 +282,12 @@ For aggregator development, the following projects provide suitable foundations:
 | **Custom FastAPI** | Starlette/FastAPI implementation | Maximum customization |
 
 Edge servers on constrained devices typically require minimal implementation (~100 lines Python).
+
+---
+
+## Example Deployments
+
+- [Example Deployment 1](example-deployments/1.md) — Home/SMB deployment with Home Assistant, OPNsense firewall, Synology NAS, and multi-room audio
 
 ---
 
